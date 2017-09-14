@@ -1,0 +1,20 @@
+INCLUDE_DIRECTORIES (
+	../include
+)
+
+SET(SRC_LIST 
+	main.cpp
+)
+
+ADD_EXECUTABLE(MyMidWare 
+	${SRC_LIST}
+)
+
+TARGET_LINK_LIBRARIES( MyMidWare
+	pthread
+)
+
+INSTALL(TARGETS MyMidWare
+	RUNTIME DESTINATION bin
+)
+
