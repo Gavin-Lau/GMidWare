@@ -10,6 +10,7 @@
 #include "session.h"
 
 #define MAX_EVENTS 10000
+#define LISTENQ 20
 
 class GServer {
 
