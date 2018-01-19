@@ -8,11 +8,6 @@ GServer::GServer()
     NetTool::setnonblocking(m_listenfd);
 
     m_epfd = epoll_create();
-
-
-
-
-
 }
 
 GServer::~GServer()
@@ -20,13 +15,13 @@ GServer::~GServer()
 
 }
 
-GServer::startService()
+int GServer::startService()
 {
     struct epoll_event ev;
     ev.data.fd = m_listenfd;
     ev.events = EPOLLIN | EPOLLET;
 
-    epoll_ctl(m_epfd, EPOLL_CTL_ADD, listenfd, &ev);
+    epoll_ctl(m_epfd, EPOLL_CTL_ADD, m_listenfd, &ev);
 
     struct sockaddr_in serveraddr;
 
@@ -41,43 +36,44 @@ GServer::startService()
     
     for (;;)
     {
-        int nfds = epoll_wait(m_epfd, events, 10000, -1);
+		int nfds = epoll_wait(m_epfd, m_events, 10000, -1);
 
         for(i = 0 ; i < nfds ; ++i)
         {
-            if (events[i].data.fd == listenfd)
+			if (m_events[i].data.fd == m_listenfd)
             {
                 struct sockaddr_in clientaddr;
                 socklen_t clilen;
 
-                connfd = accept(listenfd, (struct sockaddr*)&clientaddr, &clilen);
+                int connfd = accept(m_listenfd, (struct sockaddr*)&clientaddr, &clilen);
                 
                 NetTool::setnonblocking(connfd);
                                 
                 GSession* session = new GSession(connfd, inet_ntoa(clientaddr.sin_addr));
+				session->m_serverSink = this;
                 m_sessions.insert(std::pair<long, GSession*>(connfd, session));
                 
                 ev.data.fd = connfd;
                 ev.events = EPOLLIN | EPOLLET;
                 epoll_ctl(m_epfd,EPOLL_CTL_ADD, connfd, &ev);
 
-            } else if (events[i].events & EPOLLIN) {
+            } else if (m_events[i].events & EPOLLIN) {
                 int sockfd = -1;
                 GSession* session = NULL;
-                if ((sockfd = events[i].data.fd) < 0) continue;
+                if ((sockfd = m_events[i].data.fd) < 0) continue;
                 if ((session = m_sessions[sockfd]) == NULL) continue;
                 if (session.readAll() <= 0)
                 {
                     close(sockfd);
-                    events[i].data.fd = -1;
+                    m_events[i].data.fd = -1;
                     m_session.erase(sockfd);
                     delete session;
                 }
                 //do not add EPOLLOUT event here, only write return EAGAIN
-            } else if(events[i].events & EPOLLOUT) {
+            } else if(m_events[i].events & EPOLLOUT) {
                 int sockfd = -1;
                 GSession* session = NULL;
-                if ((sockfd = events[i].data.fd) < 0) continue;
+                if ((sockfd = m_events[i].data.fd) < 0) continue;
                 if ((session = m_sessions[sockfd]) == NULL) continue;
 
                 if (session.writeAgain() == true)
@@ -93,7 +89,17 @@ GServer::startService()
             }
         }
     }
-
 }
 
+int GServer::addOutEvent(int sockfd)
+{
+	GSession* session = NULL;
+
+	struct epoll_event ev;
+	ev.data.fd = sockfd;
+	ev.events = EPOLLOUT | EPOLLET;
+
+	if ((session = m_sessions[sockfd]) == NULL) return -1;
+	epoll_ctl(m_epfd, EPOLL_CTL_MOD, sockfd, &ev);
+}
 
