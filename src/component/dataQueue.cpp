@@ -13,8 +13,6 @@ DataQueue::DataQueue()
 
 	m_insertPos = 0;
 	m_insertChunk = 0;
-	m_extractPos = 0;
-	m_extractChunk = 0;
 }
 
 DataQueue::~DataQueue()
@@ -29,135 +27,61 @@ DataQueue::~DataQueue()
 
 void DataQueue::insertData(char* buf, int bufLen)
 {
-	while ((m_bufs.size() - m_insertChunk)*CHUNK_SIZE - m_insertPos <= bufLen)
+	/* buf 空间足够存储此次buf */
+	int copiedLen = 0;
+	char* curChunk = NULL;
+	while(copiedLen < bufLen)
 	{
-		m_bufs.push_back((char*)malloc(CHUNK_SIZE * sizeof(char)));
-	}
-
-	writeBufLen(bufLen);
-
-	int curChunkavai = CHUNK_SIZE - m_insertChunk;
-	int curBufleft = bufLen;
-	while (curBufleft > 0)
-	{
-		if (curBufleft >= curChunkavai)
+		curChunk = m_bufs[m_insertChunk];
+		/* 本块足够存储此次buf */
+		if (CHUNK_SIZE - m_insertPos > bufLen - copiedLen)
 		{
-			memcpy(m_bufs[m_insertChunk] + m_insertPos, buf + bufLen - curChunkavai, curBufleft);
-			curBufleft = curBufleft - curChunkavai;
-			curChunkavai = CHUNK_SIZE;
-			m_insertPos = 0;
-			m_insertChunk++;
-		} else {
-			memcpy(m_bufs[m_insertChunk] + m_insertPos, buf + bufLen - curChunkavai, curChunkavai);
-			m_insertPos += curBufleft;
+			memcpy(curChunk + m_insertPos, buf + copiedLen, bufLen - copiedLen);
+			m_insertPos += (bufLen - copiedLen);
 			break;
 		}
-	}
-	writeBufLen(bufLen);
-}
-
-void DataQueue::extractData(char* buf, int*bufLen)
-{
-	readBufLen(bufLen);
-	gotoLastBuf(*bufLen);
-	int curChunkavai = CHUNK_SIZE - m_insertChunk;
-	int bufcopyed = 0;
-
-	while (bufcopyed < *buf)
-	{
-		memcpy(buf + bufcopyed, m_bufs[m_extractChunk] + m_extractPos,
-					Min(curChunkavai, *bufLen - bufcopyed));
-
-	}
-	int queryLen = 0;
-	readBufLen(&queryLen);
-}
-
-
-
-void DataQueue::readBufLen(int* len)
-{
-	*len = 0;
-	if (m_insertPos > 4)
-	{
-		char* curChunk = m_bufs[m_insertChunk];
-		*len += curChunk[m_insertPos - 3];
-		*len += (curChunk[m_insertPos - 2]) << 8;
-		*len += (curChunk[m_insertPos - 1]) << 16;
-		*len += (curChunk[m_insertPos]) << 24;
-		m_insertPos += 4;
-	} else {
-
-		char* curChunk = m_bufs[m_insertChunk];
-		int readedBytes = 0;
-		while (m_insertPos >= 0)
+		else
 		{
-			*len += (curChunk[m_insertPos]) << (8 * (4 - readedBytes));
-			m_insertPos--;
-			readedBytes++;
-		}
-
-		m_insertPos = CHUNK_SIZE;
-		m_insertChunk--;
-		curChunk = m_bufs[m_insertChunk];
-
-		while (4 - readedBytes > 0)
-		{
-			*len += (curChunk[m_insertPos]) << (8 * (4 - readedBytes));
-			m_insertPos--;
-			readedBytes++;
+			memcpy(curChunk + m_insertPos, buf + copiedLen, CHUNK_SIZE - m_insertPos);
+			copiedLen += CHUNK_SIZE - m_insertPos;
+			m_insertPos = 0;
+			if (m_insertChunk == m_bufs.size() - 1)
+			{
+				m_bufs.push_back((char*)malloc(CHUNK_SIZE * sizeof(char)));
+			}
+			m_insertChunk++;
 		}
 	}
-	
+	m_bufSize.push_back(bufLen);
 }
 
-void DataQueue::writeBufLen(int len)
+void DataQueue::extractData(char* buf, int *bufLen)
 {
-	if (CHUNK_SIZE - m_insertPos > 4)
+	int lastLen = m_bufSize[m_bufSize.size() - 1];
+	m_bufSize.pop_back();
+	int curMsgChunk = m_insertChunk;
+	int curMsgPos = m_insertPos;
+	int copiedLen = 0;
+	*bufLen = lastLen;
+
+	while (copiedLen < lastLen)
 	{
-		char* curChunk = m_bufs[m_insertChunk];
-		curChunk[m_insertPos] = (unsigned char)len;
-		curChunk[m_insertPos + 1] = (unsigned char)(len >> 8);
-		curChunk[m_insertPos + 2] = (unsigned char)(len >> 16);
-		curChunk[m_insertPos + 3] = (unsigned char)(len >> 24);
-		m_insertPos += 4;
-	} else {
-		char* curChunk = m_bufs[m_insertChunk];
-		
-		int writedBytes = 0;
-		int highByte = len;
-		while (CHUNK_SIZE - m_insertPos > 0)
+		if (curMsgPos > lastLen - copiedLen)
 		{
-			curChunk[m_insertPos] = (unsigned char)highByte;
-			highByte = highByte >> 8;
-			writedBytes++;
-			m_insertPos++;
+			memcpy(buf + lastLen - copiedLen, m_bufs[curMsgChunk] + (curMsgPos - lastLen), lastLen - copiedLen);
+			copiedLen += lastLen;
+			/* 回退insert指针位置 */
+			m_insertChunk = curMsgChunk;
+			m_insertPos = curMsgPos - lastLen;
+			break;
 		}
-		m_insertPos = 0;
-		m_insertChunk++;
-		curChunk = m_bufs[m_insertChunk];
-		while (4 - writedBytes > 0)
+		else
 		{
-			curChunk[m_insertPos] = (unsigned char)highByte;
-			highByte = highByte >> 8;
-			writedBytes++;
-			m_insertPos++;
+			memcpy(buf + lastLen - copiedLen - curMsgPos, m_bufs[curMsgChunk], curMsgPos);
+			copiedLen += curMsgPos;
+			curMsgPos = CHUNK_SIZE;
+			curMsgChunk--;
 		}
 	}
-
 }
 
-void DataQueue::gotoLastBuf(int len)
-{
-	m_extractPos = 0;
-	m_extractChunk = m_insertChunk;
-	if (len < m_insertPos)
-	{
-		m_extractPos = m_insertPos - len;
-		m_extractChunk = m_insertChunk;
-	} else {
-		m_extractChunk = m_insertChunk - (len - m_insertPos) / CHUNK_SIZE 
-			- ((len - m_insertPos) % CHUNK_SIZE == 0 ? 0 : 1);
-		m_extractPos = CHUNK_SIZE - (len - m_insertPos) % CHUNK_SIZE;
-	}
-}
